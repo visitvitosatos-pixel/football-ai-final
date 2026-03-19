@@ -24,22 +24,22 @@ def is_match_posted(match_id):
         logging.error(f"DB Check Error: {e}")
         return False
 
-def save_match(match_id, teams, text):
-    """Сохраняем матч в базу напрямую через API"""
+d# В файле bot/database.py обнови функцию:
+def save_match(match_id, teams, text, league, m_time, h_logo, a_logo):
     try:
         save_url = f"{URL}/rest/v1/predictions"
         data = {
             "match_id": str(match_id),
             "teams": teams,
             "prediction_text": text,
+            "league": league,
+            "match_time": m_time,
+            "home_logo": h_logo,
+            "away_logo": a_logo,
             "status": "pending"
         }
         r = requests.post(save_url, headers=HEADERS, json=data, timeout=10)
-        if r.status_code in [200, 201]:
-            logging.info(f"✅ УСПЕШНО СОХРАНЕНО: {match_id}")
-            return True
-        logging.error(f"DB Save Failed: {r.text}")
-        return False
+        return r.status_code in [200, 201]
     except Exception as e:
         logging.error(f"DB Save Error: {e}")
         return False
