@@ -1,74 +1,42 @@
-import os
-import time
-import requests
-import threading
-import logging
+import os, time, threading, logging, requests
 from flask import Flask
+from bot.telegram import send_message
+from bot.brain import ask_ai
+from bot.news_factory import get_real_news
+from bot.database import is_match_posted, save_match, supabase # Добавил импорт клиента
 
-TOKEN = os.environ.get('TELEGRAM_TOKEN')
 FOOTBALL_KEY = os.environ.get('FOOTBALL_API_KEY')
-CHANNEL_ID = -1003740621349 
-
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 app = Flask(__name__)
 
 @app.route('/')
-def health(): return "LIVE", 200
+def health(): return "ALIVE", 200
 
-def send_tg(text):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    try:
-        requests.post(url, json={'chat_id': CHANNEL_ID, 'text': text}, timeout=10)
-        return True
-    except: return False
+def main_worker():
+    logging.info("!!! ТЕСТ ПОДКЛЮЧЕНИЯ К БАЗЕ !!!")
+    # Пробуем записать тестовую строку
+    test_save = save_match("test_id_" + str(int(time.time())), "Test Team", "Test Prediction")
+    if test_save:
+        logging.info("✅ ТЕСТ ПРОЙДЕН: База работает!")
+    else:
+        logging.error("❌ ТЕСТ ПРОВАЛЕН: База не принимает данные!")
 
-def get_matches():
-    url = "https://api.football-data.org/v4/matches"
-    try:
-        r = requests.get(url, headers={'X-Auth-Token': FOOTBALL_KEY}, timeout=15)
-        return r.json().get('matches', [])
-    except: return []
-
-def get_human_prediction(home, away):
-    # Усиленный промпт для русского языка
-    prompt = f"Write a brutal football prediction for {home} vs {away}. ANSWER ONLY IN RUSSIAN. Use street slang, 18+, be aggressive. No mentions of AI. Just your toxic opinion on the winner."
-    try:
-        # Добавляем параметр language=ru и жесткую системную установку
-        url = f"https://text.pollinations.ai/{prompt}?model=openai&system=Ты злой русский каппер. Пиши только по-русски, матом и по делу. Не смей писать на английском!"
-        res = requests.get(url, timeout=25)
-        text = res.text
-        
-        # Если пришел инглиш или ошибка - врубаем ручной режим
-        if not text or any(x in text.lower() for x in ["sorry", "error", "i am an ai", "help with that"]):
-            return f"Матч {home} — {away}. Короче, тут всё ясно. Будет месиво, хозяева заберут своё на зубах. Ставь хату на ТБ и не парься! \n\n— Твой Футбольный Псих ⚽️🔞"
-        
-        # Чистим текст и добавляем подпись
-        final_text = text.replace("Как нейросеть,", "").replace("Я ИИ,", "")
-        return f"{final_text}\n\n— Твой Футбольный Псих ⚽️🔞"
-    except:
-        return f"По игре {home} и {away}: Я хз, че там букмекеры курят, но тут пахнет разгромом. Ставь на фаворита и иди пить пиво. \n\n— Твой Футбольный Псих ⚽️🔞"
-
-def worker():
-    logging.info("STARTING...")
-    send_tg("Здорово, банда! Я в деле. Ща разберем эти матчи по косточкам... ⚽️🔥")
-    
-    posted_ids = set()
     while True:
-        matches = get_matches()
-        for m in matches:
-            m_id = m['id']
-            if m_id not in posted_ids:
-                home = m['homeTeam']['name']
-                away = m['awayTeam']['name']
-                
-                prediction = get_human_prediction(home, away)
-                if send_tg(prediction):
-                    posted_ids.add(m_id)
-                time.sleep(10) # Пауза чтобы не спамить
-        
-        time.sleep(1200)
+        try:
+            matches = [m for m in requests.get("https://api.football-data.org/v4/matches", headers={'X-Auth-Token': FOOTBALL_KEY}).json().get('matches', []) if m.get('status') in ['TIMED', 'SCHEDULED']]
+            for m in matches:
+                m_id = str(m['id'])
+                if not is_match_posted(m_id):
+                    home, away = m['homeTeam']['name'], m['awayTeam']['name']
+                    pred = ask_ai(f"Прогноз: {home} vs {away}", role="expert")
+                    if pred and send_message(f"⚽️ {home}-{away}\n\n{pred}"):
+                        save_match(m_id, f"{home}-{away}", pred)
+                        time.sleep(10)
+            time.sleep(1200)
+        except Exception as e:
+            logging.error(f"Error: {e}")
+            time.sleep(60)
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 10000))
-    threading.Thread(target=lambda: app.run(host='0.0.0.0', port=port), daemon=True).start()
-    worker()
+    threading.Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000))), daemon=True).start()
+    main_worker()
