@@ -5,79 +5,67 @@ import threading
 import logging
 from flask import Flask
 
-# Названия строго как на твоем скрине из Render
+# Конфиг из Render
 TOKEN = os.environ.get('TELEGRAM_TOKEN')
 FOOTBALL_KEY = os.environ.get('FOOTBALL_API_KEY')
-CHANNEL_ID = -1003740621349
-
-# ID турниров: АПЛ, Ла Лига, Серия А, Бундеслига, Лига 1, ЛЧ, ЛЕ, Лига Конференций, Эредивизи
-TOP_LEAGUES = [2021, 2014, 2019, 2002, 2015, 2001, 2146, 2154, 2017]
+CHANNEL_ID = -1003740621349 # Твой НОВЫЙ подтвержденный ID
 
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
 @app.route('/')
-def health(): return "SYSTEM LIVE", 200
+def health(): return "SYSTEM ONLINE", 200
 
-def get_matches():
+def send_tg(text):
+    """Прямой выстрел в Телеграм без библиотек"""
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     try:
-        url = "https://api.football-data.org/v4/matches"
-        headers = {'X-Auth-Token': FOOTBALL_KEY}
-        r = requests.get(url, headers=headers, timeout=15)
-        if r.status_code != 200: 
-            logging.error(f"API Error: {r.status_code}")
-            return []
-        
-        matches = r.json().get('matches', [])
-        # Оставляем только те, что сегодня и в нужных лигах
-        return matches # Убираем фильтр на время теста
+        r = requests.post(url, json={'chat_id': CHANNEL_ID, 'text': text}, timeout=10)
+        logging.info(f"TG Result: {r.status_code} - {r.text}")
+        return r.status_code == 200
     except Exception as e:
-        logging.error(f"Request failed: {e}")
-        return []
+        logging.error(f"TG Error: {e}")
+        return False
 
-        def send_telegram(text):
-            url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-            payload = {'chat_id': CHANNEL_ID, 'text': text}
-            try:
-                r = requests.post(url, json=payload, timeout=10)
-                if r.status_code == 200:
-                    logging.info("✅ СООБЩЕНИЕ ОТПРАВЛЕНО В КАНАЛ!")
-                    return True
-                else:
-                    # Если Телеграм отклонит запрос, мы увидим почему (например, бот не админ)
-                    logging.error(f"❌ ОШИБКА ТЕЛЕГРАМА: {r.text}")
-                    return False
-            except Exception as e:
-                logging.error(f"❌ СЕТЕВАЯ ОШИБКА: {e}")
-                return False
+def get_data():
+    """Берем матчи (БЕЗ фильтров, чтобы хоть что-то найти)"""
+    url = "https://api.football-data.org/v4/matches"
+    try:
+        r = requests.get(url, headers={'X-Auth-Token': FOOTBALL_KEY}, timeout=15)
+        return r.json().get('matches', [])
+    except: return []
 
-def bot_worker():
-    logging.info("--- РОБОТ ЗАПУЩЕН ---")
-    posted_ids = set()
+def worker():
+    logging.info("!!! ТРАКТОР ПОШЕЛ В ПОЛЕ !!!")
+    # Сразу пишем в канал, чтобы понять, живы мы или нет
+    send_tg("🚀 БОТ ПЕРЕЗАПУЩЕН НА ПРЯМЫХ ЗАПРОСАХ. ЖДИ ПРОГНОЗЫ, СУКА!")
+    
+    already_posted = set()
     
     while True:
-        matches = get_matches()
-        logging.info(f"Нашел {len(matches)} матчей в топ-лигах")
+        matches = get_data()
+        logging.info(f"Нашел {len(matches)} матчей.")
         
         for m in matches:
             m_id = m['id']
-            if m_id not in posted_ids:
+            if m_id not in already_posted:
                 home = m['homeTeam']['name']
                 away = m['awayTeam']['name']
                 
-                # Генерируем прогноз через ИИ
-                prompt = f"Матч: {home} (дома) против {away} (в гостях). Используй теорию вероятности и статистику забитых голов. Сделай жесткий матершиный прогноз, основываясь на том, что хозяева поля обычно давят, а гости сосут."
+                # Запрос к ИИ
+                prompt = f"Матч: {home} против {away}. Сделай жесткий матершиный прогноз 18+. Кто победит?"
                 try:
-                    ai_res = requests.get(f"https://text.pollinations.ai/{prompt}?system=Ты эксперт-матершинник", timeout=20)
-                    if ai_res.status_code == 200 and send_telegram(ai_res.text):
-                        posted_ids.add(m_id)
-                        logging.info(f"УСПЕХ: Пост про {home} - {away} в канале!")
+                    ai_text = requests.get(f"https://text.pollinations.ai/{prompt}?system=Ты злой футбольный каппер", timeout=20).text
+                    if ai_text and send_tg(ai_text):
+                        already_posted.add(m_id)
+                        logging.info(f"ПОСТ УШЕЛ: {home}")
                 except: continue
         
-        # Ждем 20 минут и проверяем снова
-        time.sleep(1200)
+        time.sleep(600) # Проверка каждые 10 минут
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
+    # Запускаем веб-часть
     threading.Thread(target=lambda: app.run(host='0.0.0.0', port=port), daemon=True).start()
-    bot_worker()
+    # Запускаем бота
+    worker()
