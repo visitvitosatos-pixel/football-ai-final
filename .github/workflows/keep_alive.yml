@@ -1,0 +1,13 @@
+name: Keep Bot Alive
+on:
+  schedule:
+    - cron: '*/10 * * * *' # Запуск каждые 10 минут
+  workflow_dispatch: # Возможность запустить вручную
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render Service
+        run: curl -s https://football-ai-final.onrender.com > /dev/null
+        

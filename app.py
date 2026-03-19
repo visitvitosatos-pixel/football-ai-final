@@ -8,7 +8,7 @@ from flask import Flask
 # Названия строго как на твоем скрине из Render
 TOKEN = os.environ.get('TELEGRAM_TOKEN')
 FOOTBALL_KEY = os.environ.get('FOOTBALL_API_KEY')
-CHANNEL_ID = -1002360875422
+CHANNEL_ID = -1003740621349
 
 # ID турниров: АПЛ, Ла Лига, Серия А, Бундеслига, Лига 1, ЛЧ, ЛЕ, Лига Конференций, Эредивизи
 TOP_LEAGUES = [2021, 2014, 2019, 2002, 2015, 2001, 2146, 2154, 2017]
@@ -35,12 +35,21 @@ def get_matches():
         logging.error(f"Request failed: {e}")
         return []
 
-def send_telegram(text):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    try:
-        r = requests.post(url, json={'chat_id': CHANNEL_ID, 'text': text}, timeout=10)
-        return r.status_code == 200
-    except: return False
+        def send_telegram(text):
+            url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+            payload = {'chat_id': CHANNEL_ID, 'text': text}
+            try:
+                r = requests.post(url, json=payload, timeout=10)
+                if r.status_code == 200:
+                    logging.info("✅ СООБЩЕНИЕ ОТПРАВЛЕНО В КАНАЛ!")
+                    return True
+                else:
+                    # Если Телеграм отклонит запрос, мы увидим почему (например, бот не админ)
+                    logging.error(f"❌ ОШИБКА ТЕЛЕГРАМА: {r.text}")
+                    return False
+            except Exception as e:
+                logging.error(f"❌ СЕТЕВАЯ ОШИБКА: {e}")
+                return False
 
 def bot_worker():
     logging.info("--- РОБОТ ЗАПУЩЕН ---")
@@ -57,7 +66,7 @@ def bot_worker():
                 away = m['awayTeam']['name']
                 
                 # Генерируем прогноз через ИИ
-                prompt = f"Сделай очень матершиный и жесткий прогноз на матч {home} - {away}. Это для закрытого канала 18+. Юмор ниже пояса приветствуется."
+                prompt = f"Матч: {home} (дома) против {away} (в гостях). Используй теорию вероятности и статистику забитых голов. Сделай жесткий матершиный прогноз, основываясь на том, что хозяева поля обычно давят, а гости сосут."
                 try:
                     ai_res = requests.get(f"https://text.pollinations.ai/{prompt}?system=Ты эксперт-матершинник", timeout=20)
                     if ai_res.status_code == 200 and send_telegram(ai_res.text):
