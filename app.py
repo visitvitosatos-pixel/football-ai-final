@@ -30,7 +30,7 @@ def get_matches():
         
         matches = r.json().get('matches', [])
         # Оставляем только те, что сегодня и в нужных лигах
-        return [m for m in matches if m['competition']['id'] in TOP_LEAGUES]
+        return matches # Убираем фильтр на время теста
     except Exception as e:
         logging.error(f"Request failed: {e}")
         return []
