@@ -1,42 +1,64 @@
-import os, time, threading, logging, requests
+import os
+import time
+import threading
+import logging
 from flask import Flask
+import requests
+
+# Твои модули
 from bot.telegram import send_message
 from bot.brain import ask_ai
-from bot.news_factory import get_real_news
-from bot.database import is_match_posted, save_match, supabase # Добавил импорт клиента
+from bot.database import is_match_posted, save_match
 
-FOOTBALL_KEY = os.environ.get('FOOTBALL_API_KEY')
+# Логирование
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 app = Flask(__name__)
 
 @app.route('/')
-def health(): return "ALIVE", 200
+def health():
+    return "OK", 200
 
 def main_worker():
-    logging.info("!!! ТЕСТ ПОДКЛЮЧЕНИЯ К БАЗЕ !!!")
-    # Пробуем записать тестовую строку
-    test_save = save_match("test_id_" + str(int(time.time())), "Test Team", "Test Prediction")
-    if test_save:
-        logging.info("✅ ТЕСТ ПРОЙДЕН: База работает!")
-    else:
-        logging.error("❌ ТЕСТ ПРОВАЛЕН: База не принимает данные!")
-
+    # Даем Flask 5 секунд, чтобы Render увидел порт и успокоился
+    time.sleep(5)
+    logging.info("!!! БОТ ЗАПУЩЕН !!!")
+    
+    # ТЕСТ БАЗЫ ПРИ СТАРТЕ
+    test_id = f"test_{int(time.time())}"
+    if save_match(test_id, "Test Team", "Test Forecast"):
+        logging.info("✅ БАЗА СВЯЗАНА!")
+    
     while True:
         try:
-            matches = [m for m in requests.get("https://api.football-data.org/v4/matches", headers={'X-Auth-Token': FOOTBALL_KEY}).json().get('matches', []) if m.get('status') in ['TIMED', 'SCHEDULED']]
-            for m in matches:
-                m_id = str(m['id'])
-                if not is_match_posted(m_id):
-                    home, away = m['homeTeam']['name'], m['awayTeam']['name']
-                    pred = ask_ai(f"Прогноз: {home} vs {away}", role="expert")
-                    if pred and send_message(f"⚽️ {home}-{away}\n\n{pred}"):
-                        save_match(m_id, f"{home}-{away}", pred)
-                        time.sleep(10)
+            # Твоя логика проверки матчей
+            url = "https://api.football-data.org/v4/matches"
+            headers = {'X-Auth-Token': os.environ.get('FOOTBALL_API_KEY')}
+            r = requests.get(url, headers=headers, timeout=15)
+            
+            if r.status_code == 200:
+                matches = r.json().get('matches', [])
+                for m in matches:
+                    m_id = str(m['id'])
+                    if m.get('status') in ['TIMED', 'SCHEDULED'] and not is_match_posted(m_id):
+                        home = m['homeTeam']['name']
+                        away = m['awayTeam']['name']
+                        # Прогноз
+                        pred = ask_ai(f"Матч: {home} vs {away}. Кто победит?", role="expert")
+                        if pred and send_message(f"⚽️ {home} - {away}\n\n{pred}"):
+                            save_match(m_id, f"{home}-{away}", pred)
+                            time.sleep(10)
+            
+            logging.info("Цикл завершен, спим 20 минут...")
             time.sleep(1200)
         except Exception as e:
-            logging.error(f"Error: {e}")
+            logging.error(f"Worker Error: {e}")
             time.sleep(60)
 
 if __name__ == '__main__':
-    threading.Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000))), daemon=True).start()
+    # Сначала запускаем Flask, чтобы Render увидел открытый порт
+    port = int(os.environ.get("PORT", 10000))
+    # Запускаем сервер в фоновом потоке
+    threading.Thread(target=lambda: app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)).start()
+    
+    # А воркер запускаем в основном потоке
     main_worker()
