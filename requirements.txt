@@ -1,4 +1,2 @@
-python-telegram-bot[job-queue]
 flask
 requests
-supabase==2.3.7
