@@ -33,58 +33,71 @@ def main_worker():
     headers = {'X-Auth-Token': fb_key}
     
     # Список ТОП-лиг для фильтрации (коды football-data.org)
-    important_leagues = ['PL', 'CL', 'BL1', 'PD', 'SA', 'FL1']
+    # Расширенный список лиг (коды football-data.org)
+    # Список кодов, которые точно должны работать на Free плане
+    important_leagues = [
+        'PL',   # Англия
+        'PD',   # Испания (Ла Лига)
+        'SA',   # Италия (Серия А)
+        'BL1',  # Германия
+        'FL1',  # Франция
+        'CL',   # ЛЧ
+        'ELC',  # Чемпионшип
+        'DED',  # Нидерланды
+        'PPL'   # Португалия
+    ]
 
     while True:
         try:
-            logging.info("Этап: Поиск новых игр...")
-            url = "https://api.football-data.org/v4/matches"
-            r = requests.get(url, headers=headers, timeout=15)
+            logging.info("Проверка линии...")
+            # Запрашиваем матчи. Без фильтров дат API отдает ближайшие на сегодня.
+            r = requests.get("https://api.football-data.org/v4/matches", headers=headers, timeout=15)
             
             if r.status_code == 200:
-                matches = r.json().get('matches', [])
+                data = r.json()
+                matches = data.get('matches', [])
                 
+                # Сортируем матчи по времени, чтобы постить те, что ближе всего
+                matches.sort(key=lambda x: x['utcDate'])
+
                 for m in matches:
-                    m_id = str(m['id'])
                     league_code = m['competition'].get('code')
-                    
-                    # Проверяем: не постили ли уже и входит ли в список важных лиг
-                    if not is_match_posted(m_id) and league_code in important_leagues:
+                    m_id = str(m['id'])
+
+                    # Если лига в нашем списке И мы этот матч еще не постили
+                    if league_code in important_leagues and not is_match_posted(m_id):
                         home = m['homeTeam']['name']
                         away = m['awayTeam']['name']
-                        league_name = m['competition']['name']
                         
-                        # Вызываем мощную аналитику (из brain.py)
-                        pred = analyze_match_full(home, away, league_name, match_id=m_id)
+                        logging.info(f"Нашел подходящий матч: {home} - {away} ({league_code})")
+                        
+                        # Вызываем ИИ
+                        pred = analyze_match_full(home, away, m['competition']['name'])
                         
                         if pred:
-                            text = f"⚽️ **{home} — {away}**\n🏆 {league_name}\n\n{pred}"
+                            msg = f"⚽️ **{home} — {away}**\n🏆 {m['competition']['name']}\n\n{pred}"
                             
-                            # Отправляем в Telegram
-                            tg_url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-                            res = requests.post(tg_url, json={
-                                'chat_id': CHANNEL_ID, 
-                                'text': text, 
-                                'parse_mode': 'Markdown'
-                            }).json()
+                            # Отправка
+                            res = requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", 
+                                              json={'chat_id': CHANNEL_ID, 'text': msg, 'parse_mode': 'Markdown'}).json()
                             
                             if res.get('ok'):
-                                msg_id = res['result']['message_id']
-                                save_match(m_id, f"{home}-{away}", pred, league_name, m['utcDate'], "", "")
+                                save_match(m_id, f"{home}-{away}", pred, m['competition']['name'], m['utcDate'], "", "")
+                                # Закреп для самых сочных лиг
+                                if league_code in ['CL', 'PL', 'PD']: 
+                                    pin_message(res['result']['message_id'])
                                 
-                                # Если это супер-лига (ЛЧ или АПЛ), делаем закреп
-                                if league_code in ['CL', 'PL']:
-                                    pin_message(msg_id)
-                                
-                                logging.info(f"✅ Прогноз опубликован: {home} vs {away}")
-                                break # Сделали один качественный пост и ушли в спячку
-
-            logging.info("Цикл завершен. Спим 3 часа...")
-            time.sleep(10800) # 3 часа
+                                # Пауза 5 минут перед следующим постом, если матчей несколько,
+                                # чтобы Телеграм не забанил за спам, и снова в цикл.
+                                time.sleep(300) 
+                
+            # После проверки всех матчей засыпаем на 1 час
+            logging.info("Закончил обход. Сплю 60 минут.")
+            time.sleep(3600) 
 
         except Exception as e:
-            logging.error(f"Worker Error: {e}")
-            time.sleep(300)
+            logging.error(f"Ошибка: {e}")
+            time.sleep(600)
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
