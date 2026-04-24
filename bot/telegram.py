@@ -16,3 +16,9 @@ def send_message(text):
     except Exception as e:
         logging.error(f"Telegram Delivery Error: {e}")
         return False
+    def pin_message(message_id):
+     url = f"https://api.telegram.org/bot{TOKEN}/pinChatMessage"
+    try:
+        requests.post(url, json={'chat_id': CHANNEL_ID, 'message_id': message_id}, timeout=10)
+    except Exception as e:
+        logging.error(f"Pin Error: {e}")
