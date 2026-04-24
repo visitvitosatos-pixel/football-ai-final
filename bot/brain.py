@@ -3,61 +3,55 @@ import logging
 
 def ask_ai(prompt, role="expert"):
     """
-    Универсальный мозг. 
-    Роли: 'expert' (прогнозы), 'hater' (новости/обсер), 'shizo' (странные теории)
+    Универсальный мозг. ИИ сам генерит прогнозы на основе данных из API.
     """
     roles = {
-        "expert": "Ты агрессивный футбольный каппер. Матерщинник, профи, ненавидишь тупые ставки. Пиши коротко, жёстко, с цифрами и вероятностью в %.",
-        "hater": "Ты футбольный хейтер. Твоя задача — жестко высмеивать косяки игроков и судей.",
-        "shizo": "Ты безумный фанат, который верит в заговоры масонов в футболе."
+        "expert": """Ты дерзкий футбольный каппер. Делаешь прогнозы на основе статистики.
+Формат ответа (жёстко, без воды, без "возможно"):
+
+⚡ КОНКРЕТНЫЙ ПРОГНОЗ:
+• Исход: [П1/Х/П2] — [краткое обоснование]
+• Обе забьют: [Да/Нет] — [почему]
+• Тотал: [ТБ 2.5/ТМ 2.5] — [почему]
+
+🔥 КЛЮЧЕВОЙ ФАКТ: [одна жирная причина]
+
+💎 СТАВКА: [конкретный совет]
+
+Без кэфов, без процентов, без воды. Дерзко, коротко, по делу.
+""",
+        "hater": "Ты футбольный хейтер. Жёстко высмеивай косяки.",
+        "shizo": "Ты безумный фанат конспиролог."
     }
     
-    system_setup = roles.get(role, roles["expert"])
+    system = roles.get(role, roles["expert"])
     
     try:
-        url = f"https://text.pollinations.ai/{prompt}?model=openai&system={system_setup}. ОТВЕЧАЙ ТОЛЬКО НА РУССКОМ. НЕ ИЗВИНЯЙСЯ. НЕ ПИШИ 'извини'."
-        res = requests.get(url, timeout=30)
-        text = res.text
+        url = f"https://text.pollinations.ai/{prompt}?model=openai&system={system}. ОТВЕЧАЙ ТОЛЬКО НА РУССКИЙ. НЕТ - 'возможно', 'наверное'. ДА - факты, цифры."
+        r = requests.get(url, timeout=30)
+        text = r.text
         
-        # Фильтр на случай, если ИИ начал извиняться
-        if not text or any(x in text.lower() for x in ["sorry", "error", "ai language", "извини"]):
+        if not text or any(x in text.lower() for x in ["sorry", "error", "ai language"]):
             return None
         return text
     except Exception as e:
-        logging.error(f"AI Brain error: {e}")
+        logging.error(f"AI error: {e}")
         return None
 
 
 def analyze_match_report(prediction_text, home_score, away_score, home_team, away_team):
-    """Анализирует прогноз и сравнивает с реальным счётом"""
-    
-    prompt = f"""Проанализируй прогноз и результат матча:
+    """Проверяет прошёл прогноз или нет"""
+    prompt = f"""Прогноз был: {prediction_text[:400]}
 
-Прогноз (был дан до матча): {prediction_text[:500]}
+Результат: {home_team} {home_score}:{away_score} {away_team}
 
-Реальный счёт: {home_team} {home_score} : {away_score} {away_team}
-
-Сделай вывод в ТОЧНО таком формате:
-Сначала напиши ✅ ЗАШЁЛ или ❌ НЕ ЗАШЁЛ
-Потом напиши комментарий в стиле футбольного психа (матный, но смешной, коротко)
-Потом напиши "Точность: X%" где X - число от 0 до 100
-
-Пример правильного ответа:
-✅ ЗАШЁЛ
-Ебать, точняк как по нотам! ТБ 2.5 пробили на 34 минуте. Я же говорил!
-Точность: 95%
-
-ИЛИ:
-❌ НЕ ЗАШЁЛ
-Сука, облом полный. Ожидал голы, а они в защиту сели как броненосцы.
-Точность: 30%
-
-Пиши ТОЛЬКО на русском. Никакой воды. Жёстко. Коротко. Матом."""
-    
+Напиши в ТОЧНО таком формате:
+✅/❌ [ЗАШЁЛ/НЕ ЗАШЁЛ]
+Комментарий: [коротко, дерзко, по делу]
+"""
     try:
-        url = f"https://text.pollinations.ai/{prompt}?model=openai&system=Ты агрессивный футбольный обзорщик-псих. Отвечай только в указанном формате. Три строки: статус, комментарий, точность."
-        res = requests.get(url, timeout=30)
-        return res.text
-    except Exception as e:
-        logging.error(f"Analysis error: {e}")
-        return f"❓ НЕ ПОНЯТНО\nСчёт {home_score}:{away_score} - хер разбери этот прогноз.\nТочность: 50%"
+        url = f"https://text.pollinations.ai/{prompt}?model=openai&system=Ты дерзкий каппер, подводящий итоги. Пиши коротко."
+        r = requests.get(url, timeout=30)
+        return r.text
+    except:
+        return f"❓ Счёт {home_score}:{away_score}. Непонятно. Сори."
