@@ -1,116 +1,99 @@
 import requests
 import logging
 import os
-from bot.footystats import get_team_stats, get_match_analytics, get_league_stats, get_season_id, LEAGUE_IDS, get_league_id_by_name
+from bot.footystats import get_league_id, get_league_trends
 
-FOOTYSTATS_KEY = os.environ.get('FOOTYSTATS_API_KEY', '')
-
-
-def analyze_match_full(home_team, away_team, league_name, match_id=None):
-    """
-    Полная аналитика матча:
-    - Форма команд (последние 5)
-    - Статистика по таймам
-    - Тренды лиги (ТБ 2.5, BTTS, угловые)
-    - Прогнозы
-    """
+def ask_ai_with_stats(league, home, away, match_id=None):
+    """Прогноз с реальной статистикой — понятным языком"""
     
-    # Получаем данные из FootyStats если есть match_id
-    match_data = None
-    if match_id and FOOTYSTATS_KEY:
-        match_data = get_match_analytics(match_id)
+    league_id = get_league_id(league)
+    trends_text = ""
     
-    # Статистика лиги
-    league_stats_text = ""
-    league_id = get_league_id_by_name(league_name)
-    if league_id and FOOTYSTATS_KEY:
-        # Ищем сезон 2025/2026 — твой сезон
-        season_id = get_season_id(league_id, 2025)
-        if season_id:
-            league_stats = get_league_stats(league_id, season_id)
-            if league_stats:
-                league_stats_text = f"""
-**📊 Статистика лиги {LEAGUE_IDS.get(league_name, {}).get('name', league_name)} (25/26 сезон):**
-• Средний тотал голов: {league_stats.get('avg_goals', 'нет данных')}
-• Обе забьют (BTTS): {league_stats.get('btts_percentage', 'нет данных')}% матчей
-• Тотал больше 2.5: {league_stats.get('over25_percentage', 'нет данных')}% матчей
-• Среднее за матч: ТБ 2.5 — {league_stats.get('over25_percentage', 'нет данных')}%, ТМ 2.5 — {100 - (league_stats.get('over25_percentage', 0) or 0)}%
-• Среднее количество угловых за матч: {league_stats.get('avg_corners', 'нет данных')}"""
+    if league_id:
+        trends = get_league_trends(league_id)
+        if trends:
+            over25 = trends.get('over25_percentage', '?')
+            btts = trends.get('btts_percentage', '?')
+            corners = trends.get('avg_corners', '?')
+            ht_goals = trends.get('avg_ht_goals', '?')
+            trends_text = f"""
+📊 **СТАТИСТИКА ЛИГИ {league.upper()}:**
+• В {over25}% матчей забивают больше 2.5 голов
+• В {btts}% матчей забивают обе команды
+• В среднем {corners} угловых за матч
+• В первом тайме в среднем {ht_goals} гола
+"""
+    
+    prompt = f"""Ты дерзкий футбольный эксперт. Напиши прогноз ПОНЯТНЫМ РУССКИМ ЯЗЫКОМ, без странных слов.
 
-    # Красим промпт ИИ
-    prompt = f"""Ты профессиональный футбольный аналитик. На основе предоставленных данных сделай прогноз в стиле TotalCorner.
+Матч: {home} vs {away} ({league})
 
-**Матч:** {home_team} vs {away_team}
-**Лига:** {league_name}
+{trends_text}
 
-{league_stats_text}
+Напиши ТОЧНО в таком формате (пример ниже):
 
-{"**📋 Данные API по этому матчу:**" if match_data else ""}
-{f"• Статус: {match_data.get('status')}" if match_data else ""}
-{f"• Потенциал обе забьют (BTTS): {match_data.get('btts_potential', 'нет данных')}%" if match_data else ""}
-{f"• Потенциал тотал 2.5: {match_data.get('over25_potential', 'нет данных')}%" if match_data else ""}
-{f"• Среднее количество угловых: {match_data.get('corners_potential', 'нет данных')}" if match_data else ""}
+📊 **{home} vs {away}**
 
-**🔥 Требования к ответу (строго соблюдай формат):**
+**Форма команд:**
+• {home}: [например: 3 победы, 1 ничья, 1 поражение в последних 5 матчах]
+• {away}: [например: 1 победа, 2 ничьи, 2 поражения]
 
-📊 **АНАЛИТИКА МАТЧА**
+**⚡ МОЙ ПРОГНОЗ:**
+• Кто победит: {home} / Ничья / {away} — [одна фраза почему]
+• Обе забьют: Да или Нет — [одна фраза почему]
+• Тотал больше 2.5: Да или Нет — [одна фраза почему]
+• Гол в первом тайме: Да или Нет — [одна фраза почему]
+• Угловые больше 9.5: Да или Нет — [одна фраза почему]
 
-**Форма хозяев:** [последние результаты, голы забитые/пропущенные]
-**Форма гостей:** [последние результаты, голы забитые/пропущенные]
+**🔥 ФАКТЫ:**
+• [короткий факт о хозяевах, например: "Лейпциг забивает в 8 из 10 домашних матчей"]
+• [короткий факт о гостях]
+• [короткий факт о личных встречах]
 
-**⚡ ПРОГНОЗЫ:**
-• Исход: [П1/Х/П2] — [почему]
-• Обе забьют: [Да/Нет] — [почему и вероятность в %]
-• Обе забьют в 1-м тайме: [Да/Нет] — [вероятность в %]
-• Тотал голов (2.5): [ТБ/ТМ] — [почему и вероятность в %]
-• Тотал 1-го тайма (0.5): [ТБ/ТМ] — [вероятность в %]
-• Угловые тотал (9.5): [ТБ/ТМ] — [почему]
+**💎 СТАВКА:** [конкретный совет — например: "Победа Лейпцига и обе забьют"]
 
-**🔥 КЛЮЧЕВЫЕ ФАКТЫ:**
-• [реальный факт о хозяевах с цифрами]
-• [реальный факт о гостях с цифрами]
-• [факт о личных встречах]
-
-**💎 ВЫВОД:** [конкретная ставка дня]
-
-Пиши ТОЛЬКО на русском. Без воды. Без коэффициентов. Дерзко, но профессионально."""
+ПРАВИЛА:
+- ПИШИ КОРОТКО! Максимум 1-2 предложения на пункт
+- НЕ ПИШИ "2П3П3и", "носятливый", "рациональный запас" — это бред
+- Используй простые слова: победил, проиграл, забил, пропустил
+- Пиши на русском, дерзко, но понятно
+- НЕ пиши проценты если нет точных данных
+- НЕ пиши "вероятнее всего" — пиши уверенно"""
 
     try:
-        url = f"https://text.pollinations.ai/{prompt}?model=openai&system=Ты профессиональный футбольный аналитик. Отвечай строго в указанном формате. Используй эмодзи. Только русский язык."
+        url = f"https://text.pollinations.ai/{prompt}?model=openai&system=Ты футбольный эксперт. Пиши коротко, понятно, дерзко. Без воды. Только русский. Без процентов если не уверен."
         r = requests.get(url, timeout=60)
-        return r.text.strip()
+        text = r.text
+        
+        # Фильтруем плохие ответы
+        bad_phrases = ["2П3П", "носятливый", "рациональный", "подметает", "сверхпредел", "огневка"]
+        for phrase in bad_phrases:
+            if phrase in text:
+                logging.warning(f"Плохой ответ от ИИ, пробую ещё раз...")
+                return ask_ai_with_stats(league, home, away)  # рекурсия до норм ответа
+        
+        return text.strip()
     except Exception as e:
-        logging.error(f"AI analysis error: {e}")
+        logging.error(f"AI error: {e}")
         return None
 
 
 def ask_ai(prompt, role="expert"):
-    """Универсальный мозг для прогнозов"""
+    """Запасной вариант — обычный ИИ"""
     roles = {
-        "expert": """Ты профессиональный футбольный аналитик. Делаешь прогнозы на основе данных. Формат ответа:
-📊 **АНАЛИТИКА МАТЧА**
-**Форма хозяев:** [кратко]
-**Форма гостей:** [кратко]
-**⚡ ПРОГНОЗЫ:**
-• Исход: [П1/Х/П2] — [почему]
-• Обе забьют: [Да/Нет]
-• Тотал голов (2.5): [ТБ/ТМ]
-**🔥 КЛЮЧЕВЫЕ ФАКТЫ:**
-• факт 1
-• факт 2
-**💎 ВЫВОД:** [ставка дня]""",
-        "hater": "Ты футбольный хейтер. Высмеивай косяки. Коротко, смешно, матом.",
-        "shizo": "Ты безумный фанат конспиролог."
+        "expert": "Ты футбольный эксперт. Пиши коротко, понятно, дерзко. Без странных слов. Используй простой русский язык.",
+        "hater": "Ты футбольный хейтер. Высмеивай косяки. Коротко, смешно.",
+        "shizo": "Ты безумный фанат. Пиши бредово но весело."
     }
-    
     system = roles.get(role, roles["expert"])
-    
     try:
-        url = f"https://text.pollinations.ai/{prompt}?model=openai&system={system}. ОТВЕЧАЙ ТОЛЬКО НА РУССКОМ. БЕЗ ВОДЫ."
+        url = f"https://text.pollinations.ai/{prompt}?model=openai&system={system}. ОТВЕЧАЙ ТОЛЬКО НА РУССКОМ. КОРОТКО. ПОНЯТНО. БЕЗ ВОДЫ."
         r = requests.get(url, timeout=45)
         text = r.text
-        if not text or any(x in text.lower() for x in ["sorry", "error", "извини"]):
-            return None
+        bad_phrases = ["2П3П", "носятливый", "рациональный", "подметает"]
+        for phrase in bad_phrases:
+            if phrase in text:
+                return None
         return text.strip()
     except Exception as e:
         logging.error(f"AI error: {e}")
@@ -118,30 +101,30 @@ def ask_ai(prompt, role="expert"):
 
 
 def analyze_match_report(prediction_text, home_score, away_score, home_team, away_team):
-    """Проверяет прогноз после матча"""
+    """Проверяет прогноз понятным языком"""
     prompt = f"""Прогноз был: {prediction_text[:400]}
 
 Результат: {home_team} {home_score}:{away_score} {away_team}
 
-Напиши в формате:
+Напиши КОРОТКО и ПОНЯТНО:
 
-📊 **ИТОГ МАТЧА** 📊
+{home_team} {home_score} : {away_score} {away_team}
+
+✅/❌ Прогноз {'зашёл' if 'зашёл' in prediction_text else 'не зашёл'}
+
+Комментарий: [одна короткая фраза, дерзко, без бреда]
+
+Точность: [X% от балды, примерно]"""
+
+    try:
+        url = f"https://text.pollinations.ai/{prompt}?model=openai&system=Ты итоговый аналитик. Пиши коротко. Дерзко. Понятно. Русский."
+        r = requests.get(url, timeout=30)
+        return r.text.strip()
+    except:
+        return f"""📊 **ИТОГ**
 
 {home_team} {home_score}:{away_score} {away_team}
 
-**Проверка:**
-• Исход: [ЗАШЁЛ/НЕ ЗАШЁЛ]
-• Обе забьют: [ЗАШЁЛ/НЕ ЗАШЁЛ]
-• Тотал 2.5: [ЗАШЁЛ/НЕ ЗАШЁЛ]
+❌ Прогноз НЕ ЗАШЁЛ
 
-**Комментарий:** [одно предложение, дерзко]
-
-💎 **Точность:** X%"""
-
-    try:
-        url = f"https://text.pollinations.ai/{prompt}?model=openai&system=Итоговый аналитик. Пиши строго в формате. Русский. Коротко."
-        r = requests.get(url, timeout=30)
-        return r.text.strip()
-    except Exception as e:
-        logging.error(f"Analysis error: {e}")
-        return f"""📊 **ИТОГ МАТЧА** 📊\n{home_team} {home_score}:{away_score} {away_team}\n**Комментарий:** Ошибка анализа 😤"""
+💬 Счёт {home_score}:{away_score}. В следующий раз умнее будем."""
