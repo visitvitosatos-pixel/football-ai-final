@@ -107,3 +107,38 @@ def update_match_status(match_id, status, result_score, analysis=None):
     except Exception as e:
         logging.error(f"Update Status Error: {e}")
         return False
+    def get_prediction_by_match_id(match_id):
+     """Достаём конкретный прогноз из базы"""
+    try:
+        url = f"{URL}/rest/v1/predictions?match_id=eq.{match_id}&select=*"
+        r = requests.get(url, headers=HEADERS, timeout=10)
+        data = r.json()
+        return data[0] if data else None
+    except Exception as e:
+        logging.error(f"Get prediction error: {e}")
+        return None
+
+
+def get_all_completed_matches(limit=50):
+    """Забираем завершённые матчи для статистики"""
+    try:
+        url = f"{URL}/rest/v1/predictions?status=eq.completed&select=*&order=updated_at.desc&limit={limit}"
+        r = requests.get(url, headers=HEADERS, timeout=10)
+        return r.json()
+    except Exception as e:
+        logging.error(f"Get completed error: {e}")
+        return []
+
+
+def update_match_status(match_id, status, result_score, analysis=None):
+    """Обновляем статус, результат и анализ"""
+    try:
+        url = f"{URL}/rest/v1/predictions?match_id=eq.{match_id}"
+        data = {"status": status, "result": result_score}
+        if analysis:
+            data["result_analysis"] = analysis
+        r = requests.patch(url, headers=HEADERS, json=data, timeout=10)
+        return r.status_code in [200, 204]
+    except Exception as e:
+        logging.error(f"Update Status Error: {e}")
+        return False
