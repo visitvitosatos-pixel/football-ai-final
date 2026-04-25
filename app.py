@@ -3,103 +3,123 @@ import time
 import logging
 import threading
 import requests
-from flask import Flask, jsonify
+import telebot
+from flask import Flask
 
-# Импортируем твои модули
+# Твои модули
 from bot.telegram import send_message, TOKEN, CHANNEL_ID
 from bot.brain import analyze_match_full
 from bot.database import is_match_posted, save_match, get_pending_matches, update_match_status
 
-# Настройка логов
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
 app = Flask(__name__)
+bot = telebot.TeleBot(TOKEN)
 
-def pin_message(message_id):
-    url = f"https://api.telegram.org/bot{TOKEN}/pinChatMessage"
+# --- УМНЫЙ ЗАКРЕП (SEO-friendly) ---
+def smart_pin(message_id):
+    """Открепляет старое и закрепляет новое, чтобы не бесить юзеров"""
     try:
-        requests.post(url, json={'chat_id': CHANNEL_ID, 'message_id': message_id}, timeout=10)
+        bot.unpin_all_chat_messages(CHANNEL_ID) # Чистим старые закрепы
+        bot.pin_chat_message(CHANNEL_ID, message_id, disable_notification=False)
+        logging.info(f"📌 Новый топ-матч в закрепе: {message_id}")
     except Exception as e:
         logging.error(f"Pin Error: {e}")
 
-@app.route('/')
-def health(): return "BACKEND IS LIVE", 200
+# --- ПРИЕМ ВИДЕО (Контент-маркетинг) ---
+@bot.message_handler(content_types=['video'])
+def handle_user_video(message):
+    msg = bot.reply_to(message, "🎯 Видео принято! Введи ID матча для хронологии:")
+    bot.register_next_step_handler(msg, post_video_with_stats, message.video.file_id)
 
+def post_video_with_stats(message, video_id):
+    match_id = message.text
+    caption = f"📺 **ОБЗОР МАТЧА {match_id}**\n\n📊 События и голы подтягиваются...\n\n— Твой Футбольный Псих ⚽️🔮"
+    bot.send_video(CHANNEL_ID, video_id, caption=caption, parse_mode='Markdown')
+
+# --- АВТО-ОТЧЕТЫ (Повышаем доверие/SEO) ---
+def check_results():
+    """Проверяет завершенные матчи и выводит отчеты ✅/❌"""
+    logging.info("🧐 Проверка результатов для отчета...")
+    pending = get_pending_matches() 
+    headers = {'X-Auth-Token': os.environ.get('FOOTBALL_API_KEY')}
+
+    for match in pending:
+        m_id = match.get('match_id')
+        try:
+            r = requests.get(f"https://api.football-data.org/v4/matches/{m_id}", headers=headers, timeout=10)
+            if r.status_code == 200:
+                m_data = r.json()
+                if m_data['status'] == 'FINISHED':
+                    score = f"{m_data['score']['fullTime']['home']}:{m_data['score']['fullTime']['away']}"
+                    
+                    # Формируем SEO-отчет
+                    report_text = (
+                        f"📊 **ОТЧЕТ ПО МАТЧУ**\n"
+                        f"⚽️ {match['teams']}\n"
+                        f"🏁 Итог: `{score}`\n\n"
+                        f"📢 Прогноз был: {match['prediction_text'][:100]}...\n"
+                        f"✨ Результат: Проверено системой 🤖"
+                    )
+                    send_message(report_text)
+                    update_match_status(m_id, "completed", score)
+                    logging.info(f"✅ Отчет опубликован для {m_id}")
+        except Exception as e:
+            logging.error(f"Result check error {m_id}: {e}")
+
+# --- ОСНОВНОЙ ЦИКЛ (ПРОГНОЗЫ) ---
 def main_worker():
-    time.sleep(5)
-    logging.info("!!! СИСТЕМА ЗАПУЩЕНА !!!")
-    
+    time.sleep(10)
     fb_key = os.environ.get('FOOTBALL_API_KEY')
     headers = {'X-Auth-Token': fb_key}
     
-    # Список ТОП-лиг для фильтрации (коды football-data.org)
-    # Расширенный список лиг (коды football-data.org)
-    # Список кодов, которые точно должны работать на Free плане
-    important_leagues = [
-        'PL',   # Англия
-        'PD',   # Испания (Ла Лига)
-        'SA',   # Италия (Серия А)
-        'BL1',  # Германия
-        'FL1',  # Франция
-        'CL',   # ЛЧ
-        'ELC',  # Чемпионшип
-        'DED',  # Нидерланды
-        'PPL'   # Португалия
-    ]
+    # Расширенный список для охвата всех ТОП-лиг
+    important_leagues = ['PL', 'PD', 'SA', 'BL1', 'FL1', 'CL', 'ELC', 'DED', 'PPL']
 
     while True:
         try:
-            logging.info("Проверка линии...")
-            # Запрашиваем матчи. Без фильтров дат API отдает ближайшие на сегодня.
+            # 1. Сначала чекаем результаты старых игр
+            check_results()
+
+            # 2. Ищем новые игры
             r = requests.get("https://api.football-data.org/v4/matches", headers=headers, timeout=15)
-            
             if r.status_code == 200:
-                data = r.json()
-                matches = data.get('matches', [])
-                
-                # Сортируем матчи по времени, чтобы постить те, что ближе всего
+                matches = r.json().get('matches', [])
                 matches.sort(key=lambda x: x['utcDate'])
 
                 for m in matches:
-                    league_code = m['competition'].get('code')
                     m_id = str(m['id'])
+                    league_code = m['competition'].get('code')
 
-                    # Если лига в нашем списке И мы этот матч еще не постили
                     if league_code in important_leagues and not is_match_posted(m_id):
-                        home = m['homeTeam']['name']
-                        away = m['awayTeam']['name']
-                        
-                        logging.info(f"Нашел подходящий матч: {home} - {away} ({league_code})")
-                        
-                        # Вызываем ИИ
+                        home, away = m['homeTeam']['name'], m['awayTeam']['name']
                         pred = analyze_match_full(home, away, m['competition']['name'])
                         
                         if pred:
                             msg = f"⚽️ **{home} — {away}**\n🏆 {m['competition']['name']}\n\n{pred}"
-                            
-                            # Отправка
                             res = requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", 
                                               json={'chat_id': CHANNEL_ID, 'text': msg, 'parse_mode': 'Markdown'}).json()
                             
                             if res.get('ok'):
                                 save_match(m_id, f"{home}-{away}", pred, m['competition']['name'], m['utcDate'], "", "")
-                                # Закреп для самых сочных лиг
-                                if league_code in ['CL', 'PL', 'PD']: 
-                                    pin_message(res['result']['message_id'])
                                 
-                                # Пауза 5 минут перед следующим постом, если матчей несколько,
-                                # чтобы Телеграм не забанил за спам, и снова в цикл.
-                                time.sleep(300) 
-                
-            # После проверки всех матчей засыпаем на 1 час
-            logging.info("Закончил обход. Сплю 60 минут.")
-            time.sleep(3600) 
+                                # SEO-фишка: Закрепляем только САМЫЙ свежий важный матч
+                                if league_code in ['CL', 'PL', 'PD', 'SA']:
+                                    smart_pin(res['result']['message_id'])
+                                
+                                time.sleep(300) # Анти-спам задержка
 
+            logging.info("Обход завершен. Сплю 30 минут.")
+            time.sleep(1800) 
         except Exception as e:
-            logging.error(f"Ошибка: {e}")
+            logging.error(f"Worker Error: {e}")
             time.sleep(600)
+
+@app.route('/')
+def health(): return "SYSTEM ONLINE", 200
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
-    threading.Thread(target=lambda: app.run(host='0.0.0.0', port=port), daemon=True).start()
+    threading.Thread(target=lambda: app.run(host='0.0.0.0', port=port, use_reloader=False), daemon=True).start()
+    threading.Thread(target=lambda: bot.polling(none_stop=True), daemon=True).start()
     main_worker()

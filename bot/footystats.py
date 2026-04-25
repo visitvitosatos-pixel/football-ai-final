@@ -109,3 +109,21 @@ def get_league_id_by_name(league_name):
         if name.lower() in league_name.lower():
             return data["id"]
     return None
+def get_match_timeline(match_id):
+    """Вытаскивает голы и события для поста"""
+    if not FOOTYSTATS_KEY: return ""
+    try:
+        url = f"{FOOTYSTATS_URL}/match?key={FOOTYSTATS_KEY}&match_id={match_id}"
+        r = requests.get(url, timeout=15).json()
+        data = r.get('data', {})
+        
+        events = data.get('goals', []) # FootyStats отдает голы в массиве goals
+        if not events: return "⚽ Матч был жарким, но без подробностей!"
+        
+        timeline = "📊 **ХРОНОЛОГИЯ МАТЧА:**\n"
+        for e in events:
+            side = "🏠" if e['side'] == 'home' else "🚀"
+            timeline += f"{side} {e['minute']}' — ГОООЛ! ({e['player_name']})\n"
+        return timeline
+    except:
+        return "📊 Статистика событий временно недоступна."
