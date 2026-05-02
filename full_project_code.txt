@@ -1,0 +1,290 @@
+﻿--- FILE: C:\Users\vitos\Desktop\football-ai-final\bot\brain.py ---
+def green_score(t1, t2):
+    # Р—РґРµСЃСЊ РІС‹ РјРѕР¶РµС‚Рµ РґРѕР±Р°РІРёС‚СЊ РєРѕРґ РґР»СЏ СЂР°СЃС‡РµС‚Р° Р·РµР»РµРЅРѕРіРѕ СЃС‡РµМ€СЂР°
+    return 8.4
+
+def is_value(score):
+    # Р—РґРµСЃСЊ РІС‹ РјРѕР¶РµС‚Рµ РґРѕР±Р°РІРёС‚СЊ РєРѕРґ РґР»СЏ РѕРїСЂРµРґРµР»РµРЅРёСЏ, СЏРІР»СЏРµС‚СЃСЏ Р»Рё СЃС‡РµМ€СЂ С†РµРЅРёС‚РµР»СЊРЅС‹Рј
+    return True
+
+
+--- FILE: C:\Users\vitos\Desktop\football-ai-final\bot\database.py ---
+import json
+import os
+import logging
+
+DB_FILE = "state.json"
+
+def load():
+    if not os.path.exists(DB_FILE):
+        return {}
+    with open(DB_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def save(db):
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(db, f, indent=2, ensure_ascii=False)
+
+def get_match(db, match_id):
+    return db.setdefault(match_id, {
+        "status": "NEW",
+        "published": False
+    })
+
+def mark_published(db, match_id):
+    db[match_id]["published"] = True
+    db[match_id]["status"] = "PUBLISHED"
+
+    logging.info(f"Match {match_id} marked as published")
+
+
+--- FILE: C:\Users\vitos\Desktop\football-ai-final\bot\footystats.py ---
+import requests
+
+def get_matches():
+    # Р—РґРµСЃСЊ РІС‹ РјРѕР¶РµС‚Рµ РґРѕР±Р°РІРёС‚СЊ РєРѕРґ РґР»СЏ РїРѕР»СѓС‡РµРЅРёСЏ РјР°С‚С‡РµР№ РёР· API
+    return []
+
+def get_team_stats(team_id):
+    # Р—РґРµСЃСЊ РІС‹ РјРѕР¶РµС‚Рµ РґРѕР±Р°РІРёС‚СЊ РєРѕРґ РґР»СЏ РїРѕР»СѓС‡РµРЅРёСЏ СЃС‚Р°С‚РёСЃС‚РёРєРё РєРѕРјР°РЅРґС‹ РёР· API
+    return {
+        "gf": 1.5,
+        "ga": 1.2,
+        "form": 0.7,
+        "trend": 0.6,
+        "scored_streak": 4,
+        "btts": 0.65
+    }
+
+
+--- FILE: C:\Users\vitos\Desktop\football-ai-final\bot\main.py ---
+import os
+import time
+from apscheduler.schedulers.background import BackgroundScheduler
+from database import load, save, get_match, mark_published
+from footystats import get_matches, get_team_stats
+from brain import green_score, is_value
+from news_factory import build_facts, build_post
+from telegram import Bot
+
+def process(db):
+    matches = get_matches()
+
+    for m in matches:
+        match_id = m["id"]
+
+        state = get_match(db, match_id)
+
+        if state["published"]:
+            continue
+
+        t1 = get_team_stats(m["home_id"])
+        t2 = get_team_stats(m["away_id"])
+
+        score = green_score(t1, t2)
+
+        if is_value(score):
+            facts = build_facts(m["home"], m["away"], t1, t2)
+            post = build_post(m, score, facts)
+
+            bot = Bot(token=os.getenv("TG_TOKEN"))
+            bot.send_message(chat_id=os.getenv("TG_CHANNEL"), text=post)
+
+            mark_published(db, match_id)
+
+    save(db)
+
+def start():
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(process, "interval", minutes=5)
+    scheduler.start()
+
+    print("BOT RUNNING")
+
+    while True:
+        time.sleep(60)
+
+if __name__ == "__main__":
+    db = load()
+    start()
+
+
+--- FILE: C:\Users\vitos\Desktop\football-ai-final\bot\news_factory.py ---
+def build_facts(home, away, t1, t2):
+    # Р—РґРµСЃСЊ РІС‹ РјРѕР¶РµС‚Рµ РґРѕР±Р°РІРёС‚СЊ РєРѕРґ РґР»СЏ СЃРѕР·РґР°РЅРёСЏ С„Р°РєС‚РѕРІ Рѕ РјР°С‚С‡Рµ
+    return []
+
+def build_post(match, score, facts):
+    # Р—РґРµСЃСЊ РІС‹ РјРѕР¶РµС‚Рµ РґРѕР±Р°РІРёС‚СЊ РєРѕРґ РґР»СЏ СЃРѕР·РґР°РЅРёСЏ СЃРѕРѕР±С‰РµРЅРёСЏ Рѕ РјР°С‚С‡Рµ
+    return f"{match['home']} vs {match['away']}\nGREEN: {score:.2f}\nР¤Р°РєС‚С‹:\n- " + "\n- ".join(facts)
+
+
+--- FILE: C:\Users\vitos\Desktop\football-ai-final\bot\receiver.py ---
+import telebot
+import os
+from bot.telegram import TOKEN, CHANNEL_ID
+from bot.footystats import get_match_timeline
+
+bot = telebot.TeleBot(TOKEN)
+
+@bot.message_handler(content_types=['video'])
+def handle_highlight(message):
+    # Р‘РѕС‚ РїСЂРѕСЃРёС‚ ID РјР°С‚С‡Р° РёР· FootyStats (РёР»Рё РЅР°Р·РІР°РЅРёРµ, РЅРѕ ID С‚РѕС‡РЅРµРµ)
+    msg = bot.reply_to(message, "рџЋЇ Р’РёРґРµРѕ РїСЂРёРЅСЏР»! РЎРєРёРЅСЊ ID РјР°С‚С‡Р° РёР· FootyStats РґР»СЏ С…СЂРѕРЅРѕР»РѕРіРёРё:")
+    bot.register_next_step_handler(msg, process_video_post, message.video.file_id)
+
+def process_video_post(message, video_id):
+    match_id = message.text
+    timeline = get_match_timeline(match_id)
+    
+    caption = (
+        f"рџ”Ґ **Р“РћР РЇР§РР™ РћР‘Р—РћР  РњРђРўР§Рђ**\n\n"
+        f"{timeline}\n\n"
+        f"вЂ” РўРІРѕР№ Р¤СѓС‚Р±РѕР»СЊРЅС‹Р№ РџСЃРёС… вљЅпёЏрџ”®"
+    )
+    
+    # Р РµРїРѕСЃС‚РёРј РІ РєР°РЅР°Р»
+    bot.send_video(CHANNEL_ID, video_id, caption=caption, parse_mode="Markdown")
+    bot.send_message(message.chat.id, "вњ… РљСЂР°СЃРёРІРѕ СѓР»РµС‚РµР»Рѕ РІ РєР°РЅР°Р»!")
+
+def run_receiver():
+    print("[!] Р‘РѕС‚ РЅР°С‡Р°Р» СЃР»СѓС€Р°С‚СЊ С‚РІРѕРё РІРёРґРµРѕ...")
+    bot.polling(none_stop=True)
+
+
+--- FILE: C:\Users\vitos\Desktop\football-ai-final\bot\telegram.py ---
+import os
+from bot.telegram.telegram import send_message, TOKEN, CHANNEL_ID
+
+
+--- FILE: C:\Users\vitos\Desktop\football-ai-final\bot\__init__.py ---
+
+
+--- FILE: C:\Users\vitos\Desktop\football-ai-final\app.py ---
+import os
+import time
+import logging
+import threading
+import requests
+import telebot
+from flask import Flask
+
+# РўРІРѕРё РјРѕРґСѓР»Рё
+from bot.telegram import send_message, TOKEN, CHANNEL_ID
+from bot.brain import analyze_match_full
+from bot.database import is_match_posted, save_match, get_pending_matches, update_match_status
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+
+app = Flask(__name__)
+bot = telebot.TeleBot(TOKEN)
+
+# --- РЈРњРќР«Р™ Р—РђРљР Р•Рџ (SEO-friendly) ---
+def smart_pin(message_id):
+    """РћС‚РєСЂРµРїР»СЏРµС‚ СЃС‚Р°СЂРѕРµ Рё Р·Р°РєСЂРµРїР»СЏРµС‚ РЅРѕРІРѕРµ, С‡С‚РѕР±С‹ РЅРµ Р±РµСЃРёС‚СЊ СЋР·РµСЂРѕРІ"""
+    try:
+        bot.unpin_all_chat_messages(CHANNEL_ID) # Р§РёСЃС‚РёРј СЃС‚Р°СЂС‹Рµ Р·Р°РєСЂРµРїС‹
+        bot.pin_chat_message(CHANNEL_ID, message_id, disable_notification=False)
+        logging.info(f"рџ“Њ РќРѕРІС‹Р№ С‚РѕРї-РјР°С‚С‡ РІ Р·Р°РєСЂРµРїРµ: {message_id}")
+    except Exception as e:
+        logging.error(f"Pin Error: {e}")
+
+# --- РџР РР•Рњ Р’РР”Р•Рћ (РљРѕРЅС‚РµРЅС‚-РјР°СЂРєРµС‚РёРЅРі) ---
+@bot.message_handler(content_types=['video'])
+def handle_user_video(message):
+    msg = bot.reply_to(message, "рџЋЇ Р’РёРґРµРѕ РїСЂРёРЅСЏС‚Рѕ! Р’РІРµРґРё ID РјР°С‚С‡Р° РґР»СЏ С…СЂРѕРЅРѕР»РѕРіРёРё:")
+    bot.register_next_step_handler(msg, post_video_with_stats, message.video.file_id)
+
+def post_video_with_stats(message, video_id):
+    match_id = message.text
+    caption = f"рџ“є **РћР‘Р—РћР  РњРђРўР§Рђ {match_id}**\n\nрџ“Љ РЎРѕР±С‹С‚РёСЏ Рё РіРѕР»С‹ РїРѕРґС‚СЏРіРёРІР°СЋС‚СЃСЏ...\n\nвЂ” РўРІРѕР№ Р¤СѓС‚Р±РѕР»СЊРЅС‹Р№ РџСЃРёС… вљЅпёЏрџ”®"
+    bot.send_video(CHANNEL_ID, video_id, caption=caption, parse_mode='Markdown')
+
+# --- РђР’РўРћ-РћРўР§Р•РўР« (РџРѕРІС‹С€Р°РµРј РґРѕРІРµСЂРёРµ/SEO) ---
+def check_results():
+    """РџСЂРѕРІРµСЂСЏРµС‚ Р·Р°РІРµСЂС€РµРЅРЅС‹Рµ РјР°С‚С‡Рё Рё РІС‹РІРѕРґРёС‚ РѕС‚С‡РµС‚С‹ вњ…/вќЊ"""
+    logging.info("рџ§ђ РџСЂРѕРІРµСЂРєР° СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ РґР»СЏ РѕС‚С‡РµС‚Р°...")
+    pending = get_pending_matches() 
+    headers = {'X-Auth-Token': os.environ.get('FOOTBALL_API_KEY')}
+
+    for match in pending:
+        m_id = match.get('match_id')
+        try:
+            r = requests.get(f"https://api.football-data.org/v4/matches/{m_id}", headers=headers, timeout=10)
+            if r.status_code == 200:
+                m_data = r.json()
+                if m_data['status'] == 'FINISHED':
+                    score = f"{m_data['score']['fullTime']['home']}:{m_data['score']['fullTime']['away']}"
+                    
+                    # Р¤РѕСЂРјРёСЂСѓРµРј SEO-РѕС‚С‡РµС‚
+                    report_text = (
+                        f"рџ“Љ **РћРўР§Р•Рў РџРћ РњРђРўР§РЈ**\n"
+                        f"вљЅпёЏ {match['teams']}\n"
+                        f"рџЏЃ РС‚РѕРі: `{score}`\n\n"
+                        f"рџ“ў РџСЂРѕРіРЅРѕР· Р±С‹Р»: {match['prediction_text'][:100]}...\n"
+                        f"вњЁ Р РµР·СѓР»СЊС‚Р°С‚: РџСЂРѕРІРµСЂРµРЅРѕ СЃРёСЃС‚РµРјРѕР№ рџ¤–"
+                    )
+                    send_message(report_text)
+                    update_match_status(m_id, "completed", score)
+                    logging.info(f"вњ… РћС‚С‡РµС‚ РѕРїСѓР±Р»РёРєРѕРІР°РЅ РґР»СЏ {m_id}")
+        except Exception as e:
+            logging.error(f"Result check error {m_id}: {e}")
+
+# --- РћРЎРќРћР’РќРћР™ Р¦РРљР› (РџР РћР“РќРћР—Р«) ---
+def main_worker():
+    time.sleep(10)
+    fb_key = os.environ.get('FOOTBALL_API_KEY')
+    headers = {'X-Auth-Token': fb_key}
+    
+    # Р Р°СЃС€РёСЂРµРЅРЅС‹Р№ СЃРїРёСЃРѕРє РґР»СЏ РѕС…РІР°С‚Р° РІСЃРµС… РўРћРџ-Р»РёРі
+    important_leagues = ['PL', 'PD', 'SA', 'BL1', 'FL1', 'CL', 'ELC', 'DED', 'PPL']
+
+    while True:
+        try:
+            # 1. РЎРЅР°С‡Р°Р»Р° С‡РµРєР°РµРј СЂРµР·СѓР»СЊС‚Р°С‚С‹ СЃС‚Р°СЂС‹С… РёРіСЂ
+            check_results()
+
+            # 2. РС‰РµРј РЅРѕРІС‹Рµ РёРіСЂС‹
+            r = requests.get("https://api.football-data.org/v4/matches", headers=headers, timeout=15)
+            if r.status_code == 200:
+                matches = r.json().get('matches', [])
+                matches.sort(key=lambda x: x['utcDate'])
+
+                for m in matches:
+                    m_id = str(m['id'])
+                    league_code = m['competition'].get('code')
+
+                    if league_code in important_leagues and not is_match_posted(m_id):
+                        home, away = m['homeTeam']['name'], m['awayTeam']['name']
+                        pred = analyze_match_full(home, away, m['competition']['name'])
+                        
+                        if pred:
+                            msg = f"вљЅпёЏ **{home} вЂ” {away}**\nрџЏ† {m['competition']['name']}\n\n{pred}"
+                            res = requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", 
+                                              json={'chat_id': CHANNEL_ID, 'text': msg, 'parse_mode': 'Markdown'}).json()
+                            
+                            if res.get('ok'):
+                                save_match(m_id, f"{home}-{away}", pred, m['competition']['name'], m['utcDate'], "", "")
+                                
+                                # SEO-С„РёС€РєР°: Р—Р°РєСЂРµРїР»СЏРµРј С‚РѕР»СЊРєРѕ РЎРђРњР«Р™ СЃРІРµР¶РёР№ РІР°Р¶РЅС‹Р№ РјР°С‚С‡
+                                if league_code in ['CL', 'PL', 'PD', 'SA']:
+                                    smart_pin(res['result']['message_id'])
+                                
+                                time.sleep(300) # РђРЅС‚Рё-СЃРїР°Рј Р·Р°РґРµСЂР¶РєР°
+
+            logging.info("РћР±С…РѕРґ Р·Р°РІРµСЂС€РµРЅ. РЎРїР»СЋ 30 РјРёРЅСѓС‚.")
+            time.sleep(1800) 
+        except Exception as e:
+            logging.error(f"Worker Error: {e}")
+            time.sleep(600)
+
+@app.route('/')
+def health(): return "SYSTEM ONLINE", 200
+
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 10000))
+    threading.Thread(target=lambda: app.run(host='0.0.0.0', port=port, use_reloader=False), daemon=True).start()
+    threading.Thread(target=lambda: bot.polling(none_stop=True), daemon=True).start()
+    main_worker()
+
+

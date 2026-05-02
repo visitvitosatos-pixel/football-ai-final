@@ -7,9 +7,10 @@ import telebot
 from flask import Flask
 
 # Твои модули
-from bot.telegram import send_message, TOKEN, CHANNEL_ID
-from bot.brain import analyze_match_full
-from bot.database import is_match_posted, save_match, get_pending_matches, update_match_status
+# Измени импорты, чтобы они соответствовали структуре
+from bot.telegram import bot, TOKEN, CHANNEL_ID, send_message
+from bot.brain import green_score as analyze_match_full # Используем функцию из твоего brain.py
+from bot.database import load, save, get_match as is_match_posted
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
@@ -38,6 +39,19 @@ def post_video_with_stats(message, video_id):
     bot.send_video(CHANNEL_ID, video_id, caption=caption, parse_mode='Markdown')
 
 # --- АВТО-ОТЧЕТЫ (Повышаем доверие/SEO) ---
+def get_pending_matches():
+    matches = load()
+    return [m for m in matches if m.get('status') != 'completed']
+
+def update_match_status(match_id, status, score):
+    matches = load()
+    for m in matches:
+        if str(m['match_id']) == str(match_id):
+            m['status'] = status
+            m['score'] = score
+            break
+    save(matches)
+
 def check_results():
     """Проверяет завершенные матчи и выводит отчеты ✅/❌"""
     logging.info("🧐 Проверка результатов для отчета...")
@@ -66,6 +80,19 @@ def check_results():
                     logging.info(f"✅ Отчет опубликован для {m_id}")
         except Exception as e:
             logging.error(f"Result check error {m_id}: {e}")
+
+def save_match(match_id, teams, prediction_text, competition, utcDate, status, score):
+    matches = load()
+    matches.append({
+        'match_id': match_id,
+        'teams': teams,
+        'prediction_text': prediction_text,
+        'competition': competition,
+        'utcDate': utcDate,
+        'status': status,
+        'score': score
+    })
+    save(matches)
 
 # --- ОСНОВНОЙ ЦИКЛ (ПРОГНОЗЫ) ---
 def main_worker():
