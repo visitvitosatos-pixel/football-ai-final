@@ -1,61 +1,61 @@
-import json
 import os
 import logging
+from supabase import create_client, Client
 
-DB_FILE = "state.json"
+# Подключаемся к Supabase через переменные окружения на Render
+url = os.environ.get("SUPABASE_URL")
+key = os.environ.get("SUPABASE_KEY")
+supabase: Client = create_client(url, key)
 
-def load():
-    if not os.path.exists(DB_FILE):
-        return {}
-    with open(DB_FILE, "r", encoding="utf-8") as f:
-        try:
-            return json.load(f)
-        except:
-            return {}
-
-def save(db):
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(db, f, indent=2, ensure_ascii=False)
-
-# ИСПРАВЛЕНИЕ 1: Проверка, был ли пост
 def is_match_posted(match_id):
-    db = load()
-    match = db.get(str(match_id))
-    return match is not None and match.get("published", False)
+    """Проверяет, есть ли матч в базе и опубликован ли он"""
+    try:
+        response = supabase.table("matches").select("published").eq("match_id", str(match_id)).execute()
+        if response.data:
+            return response.data[0].get("published", False)
+        return False
+    except Exception as e:
+        logging.error(f"Supabase check error: {e}")
+        return False
 
-# ИСПРАВЛЕНИЕ 2: Получение списка матчей для отчета
+def save_match(match_id, teams, prediction, league, date, x=None, y=None):
+    """Сохраняет новый прогноз в Supabase"""
+    try:
+        data = {
+            "match_id": str(match_id),
+            "teams": teams,
+            "prediction": prediction,
+            "league": league,
+            "match_date": date,
+            "status": "PUBLISHED",
+            "published": True
+        }
+        # Используем upsert, чтобы обновить если уже есть, или создать новый
+        supabase.table("matches").upsert(data).execute()
+        logging.info(f"Match {match_id} saved to Supabase")
+    except Exception as e:
+        logging.error(f"Supabase save error: {e}")
+
 def get_pending_matches():
-    db = load()
-    pending = []
-    for m_id, data in db.items():
-        if data.get("status") == "PUBLISHED": # Если запостили, но еще не проверили результат
-            pending.append({
-                "match_id": m_id,
-                "teams": data.get("teams", "Unknown"),
-                "prediction_text": data.get("prediction", "")
-            })
-    return pending
+    """Берет матчи, которые опубликованы, но еще не имеют результата"""
+    try:
+        response = supabase.table("matches").select("*").eq("status", "PUBLISHED").execute()
+        return response.data
+    except Exception as e:
+        logging.error(f"Supabase fetch pending error: {e}")
+        return []
 
-# ИСПРАВЛЕНИЕ 3: Обновление после финала
 def update_match_status(match_id, status, score=None):
-    db = load()
-    if str(match_id) in db:
-        db[str(match_id)]["status"] = "COMPLETED"
-        db[str(match_id)]["final_score"] = score
-        save(db)
+    """Обновляет статус матча на COMPLETED и записывает счет"""
+    try:
+        supabase.table("matches").update({
+            "status": "COMPLETED",
+            "final_score": score
+        }).eq("match_id", str(match_id)).execute()
+    except Exception as e:
+        logging.error(f"Supabase update error: {e}")
 
-# Для совместимости с твоим старым кодом
-def get_match(db, match_id):
-    return db.setdefault(str(match_id), {"status": "NEW", "published": False})
-
-def save_match(match_id, teams, prediction, league, date, x, y):
-    db = load()
-    db[str(match_id)] = {
-        "teams": teams,
-        "prediction": prediction,
-        "league": league,
-        "date": date,
-        "published": True,
-        "status": "PUBLISHED"
-    }
-    save(db)
+# Функции-заглушки для совместимости с app.py
+def load(): return {}
+def save(db): pass
+def get_match(db, match_id): return {"status": "NEW", "published": False}
