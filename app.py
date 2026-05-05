@@ -1,9 +1,9 @@
+print("BOT STARTED")
 import os
 import time
 import logging
 import threading
 import requests
-import telebot
 from flask import Flask
 
 # Твои модули
@@ -15,7 +15,7 @@ from bot.database import load, save, get_match as is_match_posted
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
 app = Flask(__name__)
-bot = telebot.TeleBot(TOKEN)
+
 
 # --- УМНЫЙ ЗАКРЕП (SEO-friendly) ---
 def smart_pin(message_id):
