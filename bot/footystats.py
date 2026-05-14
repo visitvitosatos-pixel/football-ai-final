@@ -1,16 +1,17 @@
-import requests
+def build_post(match, score, facts):
+    post = f"Match Report: {match['home']} vs {match['away']}\n\n"
+    post += f"Score: {score}\n\n"
 
-def get_matches():
-    # Здесь вы можете добавить код для получения матчей из API
-    return []
+    post += f"Position: {match['home_position']} vs {match['away_position']}\n\n"
 
-def get_team_stats(team_id):
-    # Здесь вы можете добавить код для получения статистики команды из API
-    return {
-        "gf": 1.5,
-        "ga": 1.2,
-        "form": 0.7,
-        "trend": 0.6,
-        "scored_streak": 4,
-        "btts": 0.65
-    }
+    post += f"Calendar Load: {match['home_calendar_load']} vs {match['away_calendar_load']}\n\n"
+
+    post += f"Cup Matches: {match['home_cup_matches']} vs {match['away_cup_matches']}\n\n"
+
+    post += f"Team Motivation: {match['home_motivation']} vs {match['away_motivation']}\n\n"
+
+    post += f"Facts:\n\n"
+    for fact in facts:
+        post += f"{fact}\n"
+
+    return post
